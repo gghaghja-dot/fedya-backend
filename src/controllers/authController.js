@@ -53,24 +53,37 @@ const register = asyncHandler(async (req, res) => {
     verification_code,
   });
 
-  if (req.body.identityKey && req.body.signedPrekey && req.body.signature) {
-    await storePublicKeys(user.id, {
-      identityKey: req.body.identityKey,
-      signedPrekey: req.body.signedPrekey,
-      signedPrekeyId: req.body.signedPrekeyId || 1,
-      signature: req.body.signature,
-      oneTimePrekeys: req.body.oneTimePrekeys || [],
-    });
+  if (display_name) {
+    await User.update(user.id, { display_name }).catch(() => null);
   }
 
-  await ensureDeveloperBadge(user);
-  await sendVerificationEmail(user.email, verification_code);
+  try {
+    if (req.body.identityKey && req.body.signedPrekey && req.body.signature) {
+      await storePublicKeys(user.id, {
+        identityKey: req.body.identityKey,
+        signedPrekey: req.body.signedPrekey,
+        signedPrekeyId: req.body.signedPrekeyId || 1,
+        signature: req.body.signature,
+        oneTimePrekeys: req.body.oneTimePrekeys || [],
+      });
+    }
+  } catch (err) {
+    logger.error('prekey store failed on register', { message: err.message });
+  }
 
-  const tokens = await issueTokens(user);
+  try {
+    await ensureDeveloperBadge(user);
+  } catch {
+    /* ignore */
+  }
+  sendVerificationEmail(user.email, verification_code).catch(() => {});
+
+  const fresh = (await User.findById(user.id)) || user;
+  const tokens = await issueTokens(fresh);
   logger.info('User registered', { userId: user.id, email: user.email });
 
   res.status(201).json({
-    user: User.toPublic(user),
+    user: User.toPublic(fresh),
     ...tokens,
   });
 });
@@ -106,16 +119,20 @@ const login = asyncHandler(async (req, res) => {
   }
 
   await User.logLogin(user.id, ip, ua, true);
-  await ensureDeveloperBadge(user);
+  try {
+    await ensureDeveloperBadge(user);
+  } catch {
+    /* ignore */
+  }
 
   let updated = user;
-  if (fcm_token) {
-    updated = await User.update(user.id, {
-      fcm_token,
-      last_seen: new Date().toISOString(),
-    });
-  } else {
-    updated = await User.update(user.id, { last_seen: new Date().toISOString() });
+  try {
+    const patch = { last_seen: new Date().toISOString() };
+    if (fcm_token) patch.fcm_token = fcm_token;
+    updated = await User.update(user.id, patch);
+  } catch (err) {
+    logger.error('login profile touch failed', { message: err.message });
+    updated = (await User.findById(user.id)) || user;
   }
 
   const tokens = await issueTokens(updated);

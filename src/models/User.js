@@ -71,6 +71,7 @@ const User = {
       privacy_online: meta.privacy_online || user.privacy_online || 'everyone',
       is_online: presence === 'online' || presence === 'away',
       presence: presence || 'offline',
+      is_verified: Boolean(await redis.get(`verified:${user.id}`)),
     };
   },
 
@@ -138,15 +139,29 @@ const User = {
       return this.findById(id);
     }
 
-    allowed.updated_at = new Date().toISOString();
+    const tryUpdate = async (payload) => {
+      const { data, error } = await supabase
+        .from('users')
+        .update(payload)
+        .eq('id', id)
+        .select()
+        .single();
+      return { data, error };
+    };
 
-    const { data, error } = await supabase
-      .from('users')
-      .update(allowed)
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) throw error;
+    let payload = { ...allowed, updated_at: new Date().toISOString() };
+    let { data, error } = await tryUpdate(payload);
+    if (error) {
+      // Legacy schemas may miss updated_at / last_seen
+      payload = { ...allowed };
+      delete payload.updated_at;
+      delete payload.last_seen;
+      ({ data, error } = await tryUpdate(payload));
+    }
+    if (error) {
+      // Still failed — keep Redis meta and return current row
+      return this.findById(id);
+    }
     return this.hydrate(data);
   },
 

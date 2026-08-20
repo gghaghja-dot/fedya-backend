@@ -3,7 +3,7 @@ const { z } = require('zod');
 const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(128),
-  username: z.string().min(3).max(32).regex(/^[a-zA-Z0-9_]+$/),
+  username: z.string().min(3).max(32).regex(/^[a-zA-Z0-9_\u0400-\u04FF]+$/),
   display_name: z.string().min(1).max(64).optional(),
   identityKey: z.string().optional(),
   signedPrekey: z.string().optional(),
@@ -44,14 +44,14 @@ const updateUserSchema = z.object({
   privacy_photo: z.enum(['everyone', 'contacts', 'nobody']).optional(),
   privacy_online: z.enum(['everyone', 'contacts', 'nobody']).optional(),
   fcm_token: z.string().nullable().optional(),
-  username: z.string().min(3).max(32).regex(/^[a-zA-Z0-9_]+$/).optional(),
+  username: z.string().min(3).max(32).regex(/^[a-zA-Z0-9_\u0400-\u04FF]+$/).optional(),
 });
 
 const sendMessageSchema = z.object({
   to: z.string().uuid(),
   content: z.string().min(1),
   encrypted: z.boolean().optional().default(true),
-  content_type: z.enum(['text', 'image', 'video', 'document', 'voice', 'sticker']).optional(),
+  content_type: z.enum(['text', 'image', 'video', 'document', 'voice', 'sticker', 'circle']).optional(),
   media_url: z.string().optional().nullable(),
   reply_to: z.string().uuid().optional().nullable(),
   forwarded_from: z.string().uuid().optional().nullable(),

@@ -27,6 +27,7 @@ router.delete('/users/:id', ctrl.deleteUser);
 router.get('/stats', ctrl.stats);
 router.get('/stats/activity', ctrl.activity);
 
+router.get('/badges', ctrl.listBadges);
 router.post('/badges', validate(badgeCreateSchema), ctrl.createBadge);
 router.put('/badges/:id', ctrl.updateBadge);
 router.delete('/badges/:id', ctrl.deleteBadge);

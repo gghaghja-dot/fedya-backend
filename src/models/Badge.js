@@ -103,20 +103,24 @@ const Badge = {
       err.status = 404;
       throw err;
     }
-    if (this.isDeveloperBadge(badge)) {
-      const err = new Error('Значок разработчика выдаётся только автоматически');
-      err.status = 403;
-      throw err;
-    }
+    // Developer badge may be awarded by admin manually too
+    const { data: existing } = await supabase
+      .from('user_badges')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('badge_id', badgeId)
+      .maybeSingle();
+    if (existing) return existing;
+
     const { data, error } = await supabase
       .from('user_badges')
-      .upsert({
+      .insert({
         user_id: userId,
         badge_id: badgeId,
         awarded_at: new Date().toISOString(),
       })
       .select()
-      .single();
+      .maybeSingle();
     if (error) throw error;
     return data;
   },

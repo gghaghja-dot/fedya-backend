@@ -11,6 +11,7 @@ router.get('/unread', ctrl.unreadCount);
 router.get('/conversations', ctrl.getConversations);
 router.get('/:userId', ctrl.getWithUser);
 router.post('/', validate(sendMessageSchema), ctrl.send);
+router.post('/:id/reactions', ctrl.react);
 router.put('/:id/read', ctrl.markRead);
 router.delete('/:id', ctrl.delete);
 

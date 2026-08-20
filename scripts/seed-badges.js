@@ -1,5 +1,5 @@
 /**
- * Seed developer + verified badges. Run once after deploy:
+ * Seed badges. Run once:
  *   node scripts/seed-badges.js
  */
 require('dotenv').config();
@@ -12,20 +12,11 @@ async function main() {
   );
 
   const badges = [
-    {
-      name: 'Разработчик',
-      description: 'Создатель FedyaLM',
-      color: '#111111',
-      icon_url: null,
-      is_auto: true,
-    },
-    {
-      name: 'Верифицирован',
-      description: 'Подтверждённый аккаунт',
-      color: '#2563EB',
-      icon_url: null,
-      is_auto: false,
-    },
+    { name: 'Разработчик', description: 'Создатель FedyaLM', color: '#111111', is_auto: true },
+    { name: 'Верифицирован', description: 'Подтверждённый аккаунт', color: '#2563EB', is_auto: false },
+    { name: 'Первое сообщение', description: 'Отправил первое сообщение', color: '#16A34A', is_auto: true },
+    { name: 'Болтун', description: '10+ сообщений', color: '#CA8A04', is_auto: true },
+    { name: 'Болтун+', description: '50+ сообщений', color: '#EA580C', is_auto: true },
   ];
 
   for (const b of badges) {
@@ -49,25 +40,19 @@ async function main() {
     .select('id,email')
     .eq('email', adminEmail)
     .maybeSingle();
-  const { data: devBadge } = await supabase
-    .from('badges')
-    .select('id')
-    .eq('name', 'Разработчик')
-    .maybeSingle();
 
-  if (admin && devBadge) {
+  for (const name of ['Разработчик', 'Верифицирован']) {
+    const { data: badge } = await supabase.from('badges').select('id').eq('name', name).maybeSingle();
+    if (!admin || !badge) continue;
     const { data: link } = await supabase
       .from('user_badges')
       .select('id')
       .eq('user_id', admin.id)
-      .eq('badge_id', devBadge.id)
+      .eq('badge_id', badge.id)
       .maybeSingle();
     if (!link) {
-      await supabase.from('user_badges').insert({
-        user_id: admin.id,
-        badge_id: devBadge.id,
-      });
-      console.log('awarded developer badge to', adminEmail);
+      await supabase.from('user_badges').insert({ user_id: admin.id, badge_id: badge.id });
+      console.log('awarded', name, 'to', adminEmail);
     }
   }
 

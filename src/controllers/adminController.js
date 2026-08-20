@@ -175,6 +175,11 @@ const activity = asyncHandler(async (_req, res) => {
   });
 });
 
+const listBadges = asyncHandler(async (_req, res) => {
+  const badges = await Badge.list();
+  res.json({ badges });
+});
+
 const createBadge = asyncHandler(async (req, res) => {
   const badge = await Badge.create({
     name: req.body.name,
@@ -207,14 +212,36 @@ const deleteBadge = asyncHandler(async (req, res) => {
 });
 
 const awardBadge = asyncHandler(async (req, res) => {
-  const { userId } = req.body;
+  let userId = req.body.userId || req.body.user_id;
+  const username = (req.body.username || '').trim();
+  if (!userId && username) {
+    const u = await User.findByUsername(username.replace(/^@/, ''));
+    if (!u) return res.status(404).json({ error: 'Пользователь не найден' });
+    userId = u.id;
+  }
+  if (!userId) return res.status(400).json({ error: 'Укажите userId или username' });
+
   const row = await Badge.award(req.params.id, userId, req.user.id);
+  const badge = await Badge.findById(req.params.id);
+  if (badge && (badge.name === 'Верифицирован' || /verif/i.test(badge.name || ''))) {
+    await redis.set(`verified:${userId}`, '1');
+  }
   res.json({ success: true, award: row });
 });
 
 const revokeBadge = asyncHandler(async (req, res) => {
-  const { userId } = req.body;
+  let userId = req.body.userId || req.body.user_id;
+  const username = (req.body.username || '').trim();
+  if (!userId && username) {
+    const u = await User.findByUsername(username.replace(/^@/, ''));
+    if (!u) return res.status(404).json({ error: 'Пользователь не найден' });
+    userId = u.id;
+  }
   await Badge.revoke(req.params.id, userId);
+  const badge = await Badge.findById(req.params.id);
+  if (badge && (badge.name === 'Верифицирован' || /verif/i.test(badge.name || ''))) {
+    await redis.del(`verified:${userId}`);
+  }
   res.json({ success: true });
 });
 
@@ -421,6 +448,7 @@ module.exports = {
   stats,
   activity,
   createBadge,
+  listBadges,
   updateBadge,
   deleteBadge,
   awardBadge,

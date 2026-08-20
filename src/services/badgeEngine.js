@@ -106,9 +106,13 @@ async function evaluateAutoBadges(userId) {
     const r = await awardBadgeByName(userId, 'first_message');
     if (r) awarded.push('first_message');
   }
-  if (messages >= 1000) {
+  if (messages >= 10) {
     const r = await awardBadgeByName(userId, 'chatterbox');
     if (r) awarded.push('chatterbox');
+  }
+  if (messages >= 50) {
+    const r = await awardBadgeByName(userId, 'Болтун+');
+    if (r) awarded.push('chatterbox_plus');
   }
 
   const ageDays = (Date.now() - new Date(user.created_at).getTime()) / (1000 * 60 * 60 * 24);

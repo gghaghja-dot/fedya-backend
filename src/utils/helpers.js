@@ -24,6 +24,7 @@ function publicUser(user) {
     role: user.role || (user.is_admin ? 'admin' : 'user'),
     is_admin: Boolean(user.is_admin),
     is_developer: isDeveloper(user),
+    is_verified: Boolean(user.is_verified),
     email_verified: user.email_verified !== false,
     premium_until: null,
     is_lifetime_premium: false,
@@ -48,7 +49,7 @@ function isPremium(user) {
   return new Date(user.premium_until) > new Date();
 }
 
-function normalizeMessage(m) {
+fun normalizeMessage(m) {
   if (!m) return null;
   const sender_id = m.sender_id || m.from_user;
   const recipient_id = m.recipient_id || m.to_user;
@@ -61,6 +62,8 @@ function normalizeMessage(m) {
     content_type: m.content_type || 'text',
     is_encrypted: m.is_encrypted !== false,
     media_url: m.media_url || null,
+    reply_to: m.reply_to || null,
+    reactions: m.reactions || {},
   };
 }
 

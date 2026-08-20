@@ -74,6 +74,29 @@ const send = asyncHandler(async (req, res) => {
   res.status(201).json({ message });
 });
 
+const react = asyncHandler(async (req, res) => {
+  const emoji = String(req.body.emoji || '').trim().slice(0, 16);
+  if (!emoji) return res.status(400).json({ error: 'emoji обязателен' });
+  const message = await Message.react(req.params.id, req.user.id, emoji);
+  if (!message) return res.status(404).json({ error: 'Сообщение не найдено' });
+  try {
+    const io = getIO();
+    if (io) {
+      const peer =
+        message.sender_id === req.user.id ? message.recipient_id : message.sender_id;
+      if (peer) {
+        io.to(`user:${peer}`).emit('message:reaction', {
+          messageId: message.id,
+          reactions: message.reactions,
+        });
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  res.json({ message });
+});
+
 const markRead = asyncHandler(async (req, res) => {
   const message = await Message.markRead(req.params.id, req.user.id);
   if (!message) return res.status(404).json({ error: 'Сообщение не найдено' });
@@ -112,6 +135,7 @@ const getConversations = asyncHandler(async (req, res) => {
 module.exports = {
   getWithUser,
   send,
+  react,
   markRead,
   delete: remove,
   unreadCount,
