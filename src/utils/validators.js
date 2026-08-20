@@ -39,7 +39,7 @@ const resetConfirmSchema = z.object({
 
 const updateUserSchema = z.object({
   display_name: z.string().min(1).max(64).optional(),
-  avatar_url: z.string().min(1).max(500).nullable().optional(),
+  avatar_url: z.string().min(1).max(2000).nullable().optional(),
   status_text: z.string().max(200).optional(),
   privacy_photo: z.enum(['everyone', 'contacts', 'nobody']).optional(),
   privacy_online: z.enum(['everyone', 'contacts', 'nobody']).optional(),

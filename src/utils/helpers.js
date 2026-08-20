@@ -5,6 +5,13 @@ function conversationIdFromUsers(userA, userB) {
   return `dm:${sorted[0]}:${sorted[1]}`;
 }
 
+function isDeveloper(user) {
+  if (!user) return false;
+  if (user.is_admin) return true;
+  const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase();
+  return Boolean(adminEmail) && String(user.email || '').toLowerCase() === adminEmail;
+}
+
 function publicUser(user) {
   if (!user) return null;
   return {
@@ -16,13 +23,16 @@ function publicUser(user) {
     status_text: user.status_text || '',
     role: user.role || (user.is_admin ? 'admin' : 'user'),
     is_admin: Boolean(user.is_admin),
+    is_developer: isDeveloper(user),
     email_verified: user.email_verified !== false,
-    premium_until: user.premium_until || null,
-    is_lifetime_premium: Boolean(user.is_lifetime_premium),
-    is_premium: isPremium(user),
+    premium_until: null,
+    is_lifetime_premium: false,
+    is_premium: false,
     privacy_photo: user.privacy_photo || 'everyone',
     privacy_online: user.privacy_online || 'everyone',
     last_seen: user.last_seen,
+    is_online: Boolean(user.is_online),
+    presence: user.presence || 'offline',
     created_at: user.created_at,
   };
 }
@@ -86,6 +96,7 @@ module.exports = {
   conversationIdFromUsers,
   publicUser,
   isPremium,
+  isDeveloper,
   normalizeMessage,
   generateCode,
   generateToken,

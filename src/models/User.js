@@ -1,9 +1,26 @@
 const bcrypt = require('bcryptjs');
 const { supabase } = require('../config/database');
-const { redis } = require('../config/redis');
+const { redis, KEYS } = require('../config/redis');
 const { publicUser, isPremium } = require('../utils/helpers');
 
 const BCRYPT_ROUNDS = 12;
+
+async function readProfileMeta(id) {
+  const raw = await redis.get(`profile:${id}`);
+  if (!raw) return {};
+  try {
+    return typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch {
+    return {};
+  }
+}
+
+async function writeProfileMeta(id, patch) {
+  const current = await readProfileMeta(id);
+  const next = { ...current, ...patch, updated_at: new Date().toISOString() };
+  await redis.set(`profile:${id}`, JSON.stringify(next));
+  return next;
+}
 
 const User = {
   async create(data) {
@@ -34,7 +51,27 @@ const User = {
   async findById(id) {
     const { data, error } = await supabase.from('users').select('*').eq('id', id).maybeSingle();
     if (error) throw error;
-    return data;
+    return this.hydrate(data);
+  }
+
+  async hydrate(user) {
+    if (!user) return null;
+    const meta = await readProfileMeta(user.id);
+    let presence = null;
+    try {
+      presence = await redis.get(KEYS.presence(user.id));
+    } catch {
+      presence = null;
+    }
+    return {
+      ...user,
+      display_name: meta.display_name || user.display_name || user.username,
+      status_text: meta.status_text || user.status_text || '',
+      privacy_photo: meta.privacy_photo || user.privacy_photo || 'everyone',
+      privacy_online: meta.privacy_online || user.privacy_online || 'everyone',
+      is_online: presence === 'online' || presence === 'away',
+      presence: presence || 'offline',
+    };
   },
 
   async findByEmail(email) {
@@ -70,6 +107,15 @@ const User = {
       }
     }
 
+    const metaKeys = ['display_name', 'status_text', 'privacy_photo', 'privacy_online'];
+    const metaPatch = {};
+    for (const key of metaKeys) {
+      if (patch[key] !== undefined) metaPatch[key] = patch[key];
+    }
+    if (Object.keys(metaPatch).length) {
+      await writeProfileMeta(id, metaPatch);
+    }
+
     const allowed = {};
     const map = [
       'username',
@@ -101,7 +147,7 @@ const User = {
       .select()
       .single();
     if (error) throw error;
-    return data;
+    return this.hydrate(data);
   },
 
   async getFcmToken(id) {
@@ -129,27 +175,23 @@ const User = {
   },
 
   async search(q, limit = 30) {
-    const term = String(q || '').trim();
+    // Support "@nick" searches from the Android UI
+    const term = String(q || '')
+      .trim()
+      .replace(/^@+/, '');
     if (!term) return [];
 
-    const pattern = `%${term.replace(/%/g, '\\%').replace(/_/g, '\\_')}%`;
+    const escaped = term.replace(/%/g, '\\%').replace(/_/g, '\\_');
+    const pattern = `%${escaped}%`;
 
     const select =
-      'id,email,username,avatar_url,is_admin,is_premium,premium_until,last_seen,created_at';
+      'id,email,username,avatar_url,is_admin,is_banned,is_premium,premium_until,last_seen,created_at';
 
-    // Do not use eq(is_banned, false) — NULLs would be excluded from results.
-    const notBanned = (q) => q.or('is_banned.eq.false,is_banned.is.null');
-
+    // No is_banned filter — NULL/missing column would hide real users.
     const [byUsername, byEmail, exact] = await Promise.all([
-      notBanned(
-        supabase.from('users').select(select).ilike('username', pattern).limit(limit)
-      ),
-      notBanned(
-        supabase.from('users').select(select).ilike('email', pattern).limit(limit)
-      ),
-      notBanned(
-        supabase.from('users').select(select).ilike('username', term).limit(5)
-      ),
+      supabase.from('users').select(select).ilike('username', pattern).limit(limit),
+      supabase.from('users').select(select).ilike('email', pattern).limit(limit),
+      supabase.from('users').select(select).ilike('username', term).limit(10),
     ]);
 
     if (byUsername.error) throw byUsername.error;
@@ -162,9 +204,15 @@ const User = {
       ...(byUsername.data || []),
       ...(byEmail.data || []),
     ]) {
+      if (row.is_banned === true) continue;
       map.set(row.id, row);
     }
-    return Array.from(map.values()).slice(0, limit);
+    const hydrated = await Promise.all(
+      Array.from(map.values())
+        .slice(0, limit)
+        .map((u) => this.hydrate(u))
+    );
+    return hydrated;
   },
 
   async ban(id, reason, until) {

@@ -15,8 +15,10 @@ const badgeRoutes = require('./routes/badges');
 const premiumRoutes = require('./routes/premium');
 const adminRoutes = require('./routes/admin');
 const keysRoutes = require('./routes/keys');
+const mediaRoutes = require('./routes/media');
 
 const app = express();
+const DEPLOY_VERSION = '2026-08-20-b';
 
 const originsEnv = process.env.CORS_ORIGINS || '*';
 const corsOptions =
@@ -59,7 +61,12 @@ app.get(/^\/admin\/.*/, sendAdminIndex);
 app.use(apiLimiter);
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', message: 'FedyaLM работает! 🚀' });
+  res.json({
+    status: 'ok',
+    message: 'FedyaLM работает! 🚀',
+    version: DEPLOY_VERSION,
+    admin: true,
+  });
 });
 
 // Flat auth aliases matching API spec (/api/register, /api/login, ...)
@@ -73,6 +80,7 @@ app.use('/api/badges', badgeRoutes);
 app.use('/api/premium', premiumRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/keys', keysRoutes);
+app.use('/api/media', mediaRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Не найдено' });
