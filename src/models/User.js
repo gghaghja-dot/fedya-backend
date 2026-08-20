@@ -129,14 +129,42 @@ const User = {
   },
 
   async search(q, limit = 30) {
-    const { data, error } = await supabase
-      .from('users')
-      .select('id,email,username,avatar_url,is_admin,is_premium,premium_until,last_seen')
-      .eq('is_banned', false)
-      .or(`username.ilike.%${q}%,email.ilike.%${q}%`)
-      .limit(limit);
-    if (error) throw error;
-    return data || [];
+    const term = String(q || '').trim();
+    if (!term) return [];
+
+    const pattern = `%${term.replace(/%/g, '\\%').replace(/_/g, '\\_')}%`;
+
+    const select =
+      'id,email,username,avatar_url,is_admin,is_premium,premium_until,last_seen,created_at';
+
+    // Do not use eq(is_banned, false) — NULLs would be excluded from results.
+    const notBanned = (q) => q.or('is_banned.eq.false,is_banned.is.null');
+
+    const [byUsername, byEmail, exact] = await Promise.all([
+      notBanned(
+        supabase.from('users').select(select).ilike('username', pattern).limit(limit)
+      ),
+      notBanned(
+        supabase.from('users').select(select).ilike('email', pattern).limit(limit)
+      ),
+      notBanned(
+        supabase.from('users').select(select).ilike('username', term).limit(5)
+      ),
+    ]);
+
+    if (byUsername.error) throw byUsername.error;
+    if (byEmail.error) throw byEmail.error;
+    if (exact.error) throw exact.error;
+
+    const map = new Map();
+    for (const row of [
+      ...(exact.data || []),
+      ...(byUsername.data || []),
+      ...(byEmail.data || []),
+    ]) {
+      map.set(row.id, row);
+    }
+    return Array.from(map.values()).slice(0, limit);
   },
 
   async ban(id, reason, until) {

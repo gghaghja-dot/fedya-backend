@@ -56,11 +56,14 @@ const getBadges = asyncHandler(async (req, res) => {
 
 const search = asyncHandler(async (req, res) => {
   const q = (req.query.q || '').trim();
-  if (!q || q.length < 2) {
-    return res.status(400).json({ error: 'Параметр q обязателен (мин. 2 символа)' });
+  if (!q || q.length < 1) {
+    return res.status(400).json({ error: 'Параметр q обязателен' });
   }
   const users = await User.search(q);
-  res.json({ users: users.map(User.toPublic) });
+  const filtered = users
+    .filter((u) => u.id !== req.user.id)
+    .map(User.toPublic);
+  res.json({ users: filtered, count: filtered.length });
 });
 
 const block = asyncHandler(async (req, res) => {

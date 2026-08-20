@@ -27,12 +27,35 @@ const corsOptions =
         credentials: true,
       };
 
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: false,
+  })
+);
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+// Admin SPA (React build under /admin/)
+const adminDir = path.join(__dirname, '../public/admin');
+const sendAdminIndex = (_req, res) => {
+  res.sendFile(path.join(adminDir, 'index.html'), (err) => {
+    if (err) res.status(404).json({ error: 'Админка не собрана. Нужен public/admin' });
+  });
+};
+app.get(['/admin', '/admin/'], sendAdminIndex);
+app.use(
+  '/admin',
+  express.static(adminDir, {
+    index: false,
+    maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0,
+  })
+);
+app.get(/^\/admin\/.*/, sendAdminIndex);
+
 app.use(apiLimiter);
 
 app.get('/health', (_req, res) => {
