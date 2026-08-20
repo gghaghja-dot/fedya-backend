@@ -52,7 +52,7 @@ const User = {
     const { data, error } = await supabase.from('users').select('*').eq('id', id).maybeSingle();
     if (error) throw error;
     return this.hydrate(data);
-  }
+  },
 
   async hydrate(user) {
     if (!user) return null;
