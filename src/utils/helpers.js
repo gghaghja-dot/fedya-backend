@@ -49,7 +49,7 @@ function isPremium(user) {
   return new Date(user.premium_until) > new Date();
 }
 
-fun normalizeMessage(m) {
+function normalizeMessage(m) {
   if (!m) return null;
   const sender_id = m.sender_id || m.from_user;
   const recipient_id = m.recipient_id || m.to_user;
