@@ -18,7 +18,7 @@ const keysRoutes = require('./routes/keys');
 const mediaRoutes = require('./routes/media');
 
 const app = express();
-const DEPLOY_VERSION = '2026-08-21-b';
+const DEPLOY_VERSION = '2026-08-21-c';
 
 const originsEnv = process.env.CORS_ORIGINS || '*';
 const corsOptions =
@@ -81,6 +81,32 @@ app.use('/api/premium', premiumRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/keys', keysRoutes);
 app.use('/api/media', mediaRoutes);
+
+// ICE for WebRTC — media stays P2P; server only returns STUN (+ optional TURN)
+app.get('/api/calls/ice', auth, (_req, res) => {
+  const iceServers = [
+    { urls: ['stun:stun.l.google.com:19302'] },
+    { urls: ['stun:stun1.l.google.com:19302'] },
+    { urls: ['stun:stun2.l.google.com:19302'] },
+  ];
+  const turnUrls = (process.env.TURN_URLS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (turnUrls.length && process.env.TURN_USERNAME && process.env.TURN_CREDENTIAL) {
+    iceServers.push({
+      urls: turnUrls,
+      username: process.env.TURN_USERNAME,
+      credential: process.env.TURN_CREDENTIAL,
+    });
+  }
+  res.json({
+    iceServers,
+    iceTransportPolicy: 'all',
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require',
+  });
+});
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Не найдено' });

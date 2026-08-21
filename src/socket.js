@@ -124,6 +124,44 @@ function initSocket(server) {
       }
     });
 
+    // ── WebRTC signaling only (media is P2P — never through Render) ──
+    const relayCall = (event, payload) => {
+      const to = payload?.to;
+      if (!to || to === userId) return false;
+      io.to(`user:${to}`).emit(event, { ...payload, from: userId });
+      return true;
+    };
+
+    socket.on('call:invite', async (payload, ack) => {
+      try {
+        const to = payload?.to;
+        if (!to || to === userId) throw new Error('Некорректный получатель');
+        const video = Boolean(payload?.video);
+        const callId = payload?.callId || `${userId}:${to}:${Date.now()}`;
+        const ok = relayCall('call:invite', { to, callId, video });
+        if (!ok) throw new Error('Не удалось отправить');
+
+        const recipient = await User.findById(to);
+        if (recipient?.fcm_token) {
+          sendPush(recipient.fcm_token, {
+            title: socket.user.display_name || socket.user.username,
+            body: video ? 'Входящий видеозвонок' : 'Входящий звонок',
+            data: { type: 'call', callId, from: userId, video: String(video) },
+          }).catch(() => {});
+        }
+        if (typeof ack === 'function') ack({ success: true, callId });
+      } catch (err) {
+        if (typeof ack === 'function') ack({ success: false, error: err.message });
+      }
+    });
+
+    socket.on('call:accept', (payload) => relayCall('call:accept', payload));
+    socket.on('call:reject', (payload) => relayCall('call:reject', payload));
+    socket.on('call:hangup', (payload) => relayCall('call:hangup', payload));
+    socket.on('call:offer', (payload) => relayCall('call:offer', payload));
+    socket.on('call:answer', (payload) => relayCall('call:answer', payload));
+    socket.on('call:ice', (payload) => relayCall('call:ice', payload));
+
     socket.on('disconnect', async () => {
       await redis.set(KEYS.presence(userId), 'offline', { ex: 86400 });
       await User.update(userId, { last_seen: new Date().toISOString() });
