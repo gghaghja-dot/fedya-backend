@@ -45,13 +45,18 @@ function initSocket(server) {
   io.on('connection', async (socket) => {
     const userId = socket.user.id;
     socket.join(`user:${userId}`);
-    await redis.set(KEYS.presence(userId), 'online', { ex: 120 });
+    await redis.set(KEYS.presence(userId), 'online', { ex: 300 });
     socket.broadcast.emit('presence', { userId, status: 'online' });
     logger.info('Socket connected', { userId });
 
+    // Keep presence fresh while connected
+    const presenceBeat = setInterval(() => {
+      redis.set(KEYS.presence(userId), 'online', { ex: 300 }).catch(() => {});
+    }, 60_000);
+
     socket.on('presence', async (data) => {
       const status = data?.status === 'away' ? 'away' : 'online';
-      await redis.set(KEYS.presence(userId), status, { ex: 120 });
+      await redis.set(KEYS.presence(userId), status, { ex: 300 });
       socket.broadcast.emit('presence', { userId, status });
     });
 
@@ -138,7 +143,12 @@ function initSocket(server) {
         if (!to || to === userId) throw new Error('Некорректный получатель');
         const video = Boolean(payload?.video);
         const callId = payload?.callId || `${userId}:${to}:${Date.now()}`;
-        const ok = relayCall('call:invite', { to, callId, video });
+        const ok = relayCall('call:invite', {
+          to,
+          callId,
+          video,
+          fromName: socket.user.display_name || socket.user.username || '',
+        });
         if (!ok) throw new Error('Не удалось отправить');
 
         const recipient = await User.findById(to);
@@ -163,6 +173,7 @@ function initSocket(server) {
     socket.on('call:ice', (payload) => relayCall('call:ice', payload));
 
     socket.on('disconnect', async () => {
+      clearInterval(presenceBeat);
       await redis.set(KEYS.presence(userId), 'offline', { ex: 86400 });
       await User.update(userId, { last_seen: new Date().toISOString() });
       socket.broadcast.emit('presence', { userId, status: 'offline' });

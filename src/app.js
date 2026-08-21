@@ -16,9 +16,10 @@ const premiumRoutes = require('./routes/premium');
 const adminRoutes = require('./routes/admin');
 const keysRoutes = require('./routes/keys');
 const mediaRoutes = require('./routes/media');
+const groupRoutes = require('./routes/groups');
 
 const app = express();
-const DEPLOY_VERSION = '2026-08-21-d';
+const DEPLOY_VERSION = '2026-08-21-e';
 
 const originsEnv = process.env.CORS_ORIGINS || '*';
 const corsOptions =
@@ -81,6 +82,7 @@ app.use('/api/premium', premiumRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/keys', keysRoutes);
 app.use('/api/media', mediaRoutes);
+app.use('/api/groups', groupRoutes);
 
 // ICE for WebRTC — media stays P2P; server only returns STUN + public TURN fallback
 app.get('/api/calls/ice', auth, (_req, res) => {

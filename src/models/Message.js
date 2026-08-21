@@ -214,9 +214,42 @@ const Message = {
     if (error) throw error;
 
     const byPeer = new Map();
+    const groups = [];
     for (const m of memberships || []) {
       const chat = m.chats;
-      if (!chat || chat.is_group) continue;
+      if (!chat) continue;
+
+      if (chat.is_group) {
+        const { data: members } = await supabase
+          .from('chat_members')
+          .select('user_id')
+          .eq('chat_id', chat.id);
+        const count = (members || []).length;
+        const lastRaw = await redis.lindex(`gmsg:${chat.id}`, 0);
+        let lastMsg = null;
+        if (lastRaw) {
+          try {
+            lastMsg = typeof lastRaw === 'string' ? JSON.parse(lastRaw) : lastRaw;
+          } catch {
+            lastMsg = null;
+          }
+        }
+        groups.push({
+          membership: m,
+          conversation: {
+            id: chat.id,
+            type: 'group',
+            title: chat.name,
+            created_by: chat.created_by,
+            created_at: chat.created_at,
+            peer_id: null,
+            member_count: count,
+          },
+          last_message: lastMsg,
+          unread: 0,
+        });
+        continue;
+      }
 
       const { data: members } = await supabase
         .from('chat_members')
@@ -259,7 +292,7 @@ const Message = {
       }
     }
 
-    const result = Array.from(byPeer.values());
+    const result = [...Array.from(byPeer.values()), ...groups];
     result.sort((a, b) => {
       const ta = a.last_message?.created_at || a.conversation?.created_at || '';
       const tb = b.last_message?.created_at || b.conversation?.created_at || '';
