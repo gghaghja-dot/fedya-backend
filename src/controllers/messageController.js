@@ -119,6 +119,22 @@ const markRead = asyncHandler(async (req, res) => {
 const remove = asyncHandler(async (req, res) => {
   const message = await Message.softDelete(req.params.id, req.user.id);
   if (!message) return res.status(404).json({ error: 'Сообщение не найдено' });
+  try {
+    const io = getIO();
+    if (io) {
+      const peer =
+        message.sender_id === req.user.id ? message.recipient_id : message.sender_id;
+      const payload = {
+        messageId: message.id,
+        conversationId: message.conversation_id || null,
+        from: req.user.id,
+      };
+      if (peer) io.to(`user:${peer}`).emit('message:deleted', payload);
+      io.to(`user:${req.user.id}`).emit('message:deleted', payload);
+    }
+  } catch {
+    /* ignore */
+  }
   res.json({ success: true, message });
 });
 

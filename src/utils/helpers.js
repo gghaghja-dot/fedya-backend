@@ -8,6 +8,7 @@ function conversationIdFromUsers(userA, userB) {
 function isDeveloper(user) {
   if (!user) return false;
   if (user.is_admin) return true;
+  if (user.role === 'developer' || user.role === 'admin') return true;
   const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase();
   return Boolean(adminEmail) && String(user.email || '').toLowerCase() === adminEmail;
 }

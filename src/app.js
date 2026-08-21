@@ -19,7 +19,7 @@ const mediaRoutes = require('./routes/media');
 const groupRoutes = require('./routes/groups');
 
 const app = express();
-const DEPLOY_VERSION = '2026-08-21-e';
+const DEPLOY_VERSION = '2026-08-21-f';
 
 const originsEnv = process.env.CORS_ORIGINS || '*';
 const corsOptions =

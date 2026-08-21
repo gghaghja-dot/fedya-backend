@@ -8,10 +8,17 @@ const { evaluateAutoBadges } = require('./services/badgeEngine');
 const { sendPush } = require('./services/fcm');
 const logger = require('./services/logger');
 
+const { supabase } = require('./config/database');
+
 let ioInstance = null;
 
 function getIO() {
   return ioInstance;
+}
+
+async function memberIdsForGroup(chatId) {
+  const { data } = await supabase.from('chat_members').select('user_id').eq('chat_id', chatId);
+  return (data || []).map((m) => String(m.user_id));
 }
 
 function initSocket(server) {
@@ -60,12 +67,28 @@ function initSocket(server) {
       socket.broadcast.emit('presence', { userId, status });
     });
 
-    socket.on('typing:start', ({ to }) => {
+    socket.on('typing:start', ({ to, groupId }) => {
+      if (groupId) {
+        memberIdsForGroup(groupId).then((ids) => {
+          ids.forEach((id) => {
+            if (id !== userId) io.to(`user:${id}`).emit('typing:start', { from: userId, groupId });
+          });
+        }).catch(() => {});
+        return;
+      }
       if (!to) return;
       io.to(`user:${to}`).emit('typing:start', { from: userId });
     });
 
-    socket.on('typing:stop', ({ to }) => {
+    socket.on('typing:stop', ({ to, groupId }) => {
+      if (groupId) {
+        memberIdsForGroup(groupId).then((ids) => {
+          ids.forEach((id) => {
+            if (id !== userId) io.to(`user:${id}`).emit('typing:stop', { from: userId, groupId });
+          });
+        }).catch(() => {});
+        return;
+      }
       if (!to) return;
       io.to(`user:${to}`).emit('typing:stop', { from: userId });
     });

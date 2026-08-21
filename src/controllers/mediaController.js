@@ -40,6 +40,12 @@ function extFromMime(mime, original) {
   if (mime.includes('jpeg') || mime.includes('jpg')) return '.jpg';
   if (mime.includes('webp')) return '.webp';
   if (mime.includes('gif')) return '.gif';
+  if (mime.includes('pdf')) return '.pdf';
+  if (mime.includes('zip')) return '.zip';
+  if (mime.includes('word') || mime.includes('document')) return '.docx';
+  if (mime.includes('sheet') || mime.includes('excel')) return '.xlsx';
+  if (mime.includes('flac')) return '.flac';
+  if (mime.includes('wav')) return '.wav';
   return '.bin';
 }
 
