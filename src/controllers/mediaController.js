@@ -6,9 +6,12 @@ const { redis } = require('../config/redis');
 const User = require('../models/User');
 const { asyncHandler } = require('../utils/helpers');
 
+// Render disk is ephemeral / multi-instance — keep media bytes in Redis
+const MAX_REDIS_BYTES = 7 * 1024 * 1024;
+
 const memoryUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 40 * 1024 * 1024 },
+  limits: { fileSize: 12 * 1024 * 1024 },
 });
 
 const relayDir = path.join(__dirname, '../../uploads/relay');
@@ -35,6 +38,8 @@ function extFromMime(mime, original) {
   if (mime.includes('ogg')) return '.ogg';
   if (mime.includes('png')) return '.png';
   if (mime.includes('jpeg') || mime.includes('jpg')) return '.jpg';
+  if (mime.includes('webp')) return '.webp';
+  if (mime.includes('gif')) return '.gif';
   return '.bin';
 }
 
@@ -69,22 +74,35 @@ const uploadRelay = [
   memoryUpload.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Файл обязателен' });
+    if (req.file.size > MAX_REDIS_BYTES) {
+      return res.status(413).json({
+        error: `Файл слишком большой (макс. ${Math.floor(MAX_REDIS_BYTES / (1024 * 1024))} МБ)`,
+      });
+    }
     const id = uuidv4();
     const mime = req.file.mimetype || 'application/octet-stream';
     const name = req.file.originalname || 'file';
     const ext = extFromMime(mime, name);
-    const filePath = path.join(relayDir, `${id}${ext}`);
-    fs.writeFileSync(filePath, req.file.buffer);
 
+    // Always persist bytes in Redis so any Render instance can serve them
     const meta = {
       mime,
       name,
-      path: filePath,
+      data: req.file.buffer.toString('base64'),
       from: req.user.id,
       created_at: new Date().toISOString(),
       size: req.file.size,
     };
-    // Keep playable for a day — metadata in Redis, bytes on disk
+
+    // Optional local cache (best-effort; not relied on for serving)
+    try {
+      const filePath = path.join(relayDir, `${id}${ext}`);
+      fs.writeFileSync(filePath, req.file.buffer);
+      meta.path = filePath;
+    } catch {
+      /* ignore disk errors on Render */
+    }
+
     await redis.set(`media:relay:${id}`, JSON.stringify(meta), { ex: 60 * 60 * 24 });
 
     const url = `${publicBase(req)}/api/media/relay/${id}`;
@@ -106,11 +124,10 @@ const getRelay = asyncHandler(async (req, res) => {
   const payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
 
   let buf;
-  if (payload.path && fs.existsSync(payload.path)) {
-    buf = fs.readFileSync(payload.path);
-  } else if (payload.data) {
-    // Legacy Redis-base64 payloads
+  if (payload.data) {
     buf = Buffer.from(payload.data, 'base64');
+  } else if (payload.path && fs.existsSync(payload.path)) {
+    buf = fs.readFileSync(payload.path);
   } else {
     return res.status(404).json({ error: 'Файл истёк или не найден' });
   }
@@ -122,8 +139,8 @@ const getRelay = asyncHandler(async (req, res) => {
   );
   res.setHeader('Cache-Control', 'private, max-age=3600');
   res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Access-Control-Allow-Origin', '*');
 
-  // Optional one-shot delete (default keep so peer can replay)
   if (String(req.query.once || '0') === '1') {
     await redis.del(key);
     if (payload.path && fs.existsSync(payload.path)) {

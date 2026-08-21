@@ -18,7 +18,7 @@ const keysRoutes = require('./routes/keys');
 const mediaRoutes = require('./routes/media');
 
 const app = express();
-const DEPLOY_VERSION = '2026-08-21-c';
+const DEPLOY_VERSION = '2026-08-21-d';
 
 const originsEnv = process.env.CORS_ORIGINS || '*';
 const corsOptions =
@@ -82,12 +82,22 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/keys', keysRoutes);
 app.use('/api/media', mediaRoutes);
 
-// ICE for WebRTC — media stays P2P; server only returns STUN (+ optional TURN)
+// ICE for WebRTC — media stays P2P; server only returns STUN + public TURN fallback
 app.get('/api/calls/ice', auth, (_req, res) => {
   const iceServers = [
     { urls: ['stun:stun.l.google.com:19302'] },
     { urls: ['stun:stun1.l.google.com:19302'] },
     { urls: ['stun:stun2.l.google.com:19302'] },
+    // Free openrelay TURN — needed for mobile carrier NAT (otherwise stuck on «Соединение…»)
+    {
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:443',
+        'turns:openrelay.metered.ca:443',
+      ],
+      username: process.env.TURN_USERNAME || 'openrelayproject',
+      credential: process.env.TURN_CREDENTIAL || 'openrelayproject',
+    },
   ];
   const turnUrls = (process.env.TURN_URLS || '')
     .split(',')
