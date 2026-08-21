@@ -51,7 +51,7 @@ const sendMessageSchema = z.object({
   to: z.string().uuid(),
   content: z.string().min(1),
   encrypted: z.boolean().optional().default(true),
-  content_type: z.enum(['text', 'image', 'video', 'document', 'voice', 'sticker', 'circle']).optional(),
+  content_type: z.enum(['text', 'image', 'video', 'document', 'voice', 'sticker', 'circle', 'video_circle']).optional(),
   media_url: z.string().optional().nullable(),
   reply_to: z.string().uuid().optional().nullable(),
   forwarded_from: z.string().uuid().optional().nullable(),

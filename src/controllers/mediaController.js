@@ -1,3 +1,5 @@
+const path = require('path');
+const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
 const { redis } = require('../config/redis');
@@ -6,8 +8,13 @@ const { asyncHandler } = require('../utils/helpers');
 
 const memoryUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 },
+  limits: { fileSize: 40 * 1024 * 1024 },
 });
+
+const relayDir = path.join(__dirname, '../../uploads/relay');
+if (!fs.existsSync(relayDir)) {
+  fs.mkdirSync(relayDir, { recursive: true });
+}
 
 function publicBase(req) {
   const env = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
@@ -15,6 +22,20 @@ function publicBase(req) {
   const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
   const host = req.headers['x-forwarded-host'] || req.get('host');
   return `${proto}://${host}`;
+}
+
+function extFromMime(mime, original) {
+  const fromName = path.extname(original || '').toLowerCase();
+  if (fromName) return fromName;
+  if (!mime) return '.bin';
+  if (mime.includes('mp4')) return '.mp4';
+  if (mime.includes('webm')) return '.webm';
+  if (mime.includes('m4a') || mime.includes('mp4a') || mime.includes('aac')) return '.m4a';
+  if (mime.includes('mpeg') || mime.includes('mp3')) return '.mp3';
+  if (mime.includes('ogg')) return '.ogg';
+  if (mime.includes('png')) return '.png';
+  if (mime.includes('jpeg') || mime.includes('jpg')) return '.jpg';
+  return '.bin';
 }
 
 const uploadAvatar = [
@@ -49,23 +70,31 @@ const uploadRelay = [
   asyncHandler(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Файл обязателен' });
     const id = uuidv4();
-    const payload = {
-      mime: req.file.mimetype || 'application/octet-stream',
-      name: req.file.originalname || 'file',
-      data: req.file.buffer.toString('base64'),
+    const mime = req.file.mimetype || 'application/octet-stream';
+    const name = req.file.originalname || 'file';
+    const ext = extFromMime(mime, name);
+    const filePath = path.join(relayDir, `${id}${ext}`);
+    fs.writeFileSync(filePath, req.file.buffer);
+
+    const meta = {
+      mime,
+      name,
+      path: filePath,
       from: req.user.id,
       created_at: new Date().toISOString(),
+      size: req.file.size,
     };
-    // Ephemeral only — Redis TTL, never written to disk
-    await redis.set(`media:relay:${id}`, JSON.stringify(payload), { ex: 60 * 60 });
+    // Keep playable for a day — metadata in Redis, bytes on disk
+    await redis.set(`media:relay:${id}`, JSON.stringify(meta), { ex: 60 * 60 * 24 });
+
     const url = `${publicBase(req)}/api/media/relay/${id}`;
     res.status(201).json({
       id,
       url,
-      name: payload.name,
-      mime: payload.mime,
+      name: meta.name,
+      mime: meta.mime,
       size: req.file.size,
-      expires_in: 3600,
+      expires_in: 86400,
     });
   }),
 ];
@@ -75,16 +104,35 @@ const getRelay = asyncHandler(async (req, res) => {
   const raw = await redis.get(key);
   if (!raw) return res.status(404).json({ error: 'Файл истёк или не найден' });
   const payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
-  const buf = Buffer.from(payload.data, 'base64');
+
+  let buf;
+  if (payload.path && fs.existsSync(payload.path)) {
+    buf = fs.readFileSync(payload.path);
+  } else if (payload.data) {
+    // Legacy Redis-base64 payloads
+    buf = Buffer.from(payload.data, 'base64');
+  } else {
+    return res.status(404).json({ error: 'Файл истёк или не найден' });
+  }
+
   res.setHeader('Content-Type', payload.mime || 'application/octet-stream');
   res.setHeader(
     'Content-Disposition',
-    `attachment; filename="${encodeURIComponent(payload.name || 'file')}"`
+    `inline; filename="${encodeURIComponent(payload.name || 'file')}"`,
   );
-  res.setHeader('Cache-Control', 'no-store');
-  // One-time download removes payload so server does not keep the file
-  if (String(req.query.once || '1') !== '0') {
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.setHeader('Accept-Ranges', 'bytes');
+
+  // Optional one-shot delete (default keep so peer can replay)
+  if (String(req.query.once || '0') === '1') {
     await redis.del(key);
+    if (payload.path && fs.existsSync(payload.path)) {
+      try {
+        fs.unlinkSync(payload.path);
+      } catch {
+        /* ignore */
+      }
+    }
   }
   res.send(buf);
 });

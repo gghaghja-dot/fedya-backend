@@ -18,7 +18,7 @@ const keysRoutes = require('./routes/keys');
 const mediaRoutes = require('./routes/media');
 
 const app = express();
-const DEPLOY_VERSION = '2026-08-21-a';
+const DEPLOY_VERSION = '2026-08-21-b';
 
 const originsEnv = process.env.CORS_ORIGINS || '*';
 const corsOptions =
