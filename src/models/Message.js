@@ -34,34 +34,41 @@ async function withMeta(msg) {
 
 const Message = {
   async ensureDmConversation(userA, userB) {
+    if (!userA || !userB || userA === userB) {
+      const err = new Error('Нельзя создать чат с собой');
+      err.status = 400;
+      throw err;
+    }
     const title = conversationIdFromUsers(userA, userB);
 
-    // Prefer shared membership lookup to avoid duplicate DMs
+    // Unique users per chat — avoid false "shared" from duplicate memberships
     const { data: memberships } = await supabase
       .from('chat_members')
       .select('chat_id, user_id')
       .in('user_id', [userA, userB]);
 
     if (memberships?.length) {
-      const counts = {};
+      const byChat = {};
       for (const m of memberships) {
-        counts[m.chat_id] = (counts[m.chat_id] || 0) + 1;
+        if (!byChat[m.chat_id]) byChat[m.chat_id] = new Set();
+        byChat[m.chat_id].add(String(m.user_id));
       }
-      const sharedIds = Object.keys(counts).filter((id) => counts[id] >= 2);
-      for (const sharedId of sharedIds) {
-        const { data: chat } = await supabase
-          .from('chats')
-          .select('*')
-          .eq('id', sharedId)
-          .eq('is_group', false)
-          .maybeSingle();
-        if (chat) return chat;
+      for (const [chatId, users] of Object.entries(byChat)) {
+        if (users.has(String(userA)) && users.has(String(userB)) && users.size >= 2) {
+          const { data: chat } = await supabase
+            .from('chats')
+            .select('*')
+            .eq('id', chatId)
+            .eq('is_group', false)
+            .maybeSingle();
+          if (chat) return chat;
+        }
       }
     }
 
     const { data: existing } = await supabase
       .from('chats')
-      .select('*, chat_members(*)')
+      .select('*')
       .eq('is_group', false)
       .eq('name', title)
       .maybeSingle();
@@ -160,7 +167,7 @@ const Message = {
   async markRead(id, userId) {
     const msg = await this.findById(id);
     if (!msg) return null;
-    if (msg.recipient_id !== userId) {
+    if (String(msg.recipient_id || msg.to_user) !== String(userId)) {
       const err = new Error('Forbidden');
       err.status = 403;
       throw err;
@@ -178,7 +185,7 @@ const Message = {
   async softDelete(id, userId) {
     const msg = await this.findById(id);
     if (!msg) return null;
-    if (msg.sender_id !== userId) {
+    if (String(msg.sender_id) !== String(userId)) {
       const err = new Error('Можно удалить только своё сообщение');
       err.status = 403;
       throw err;
@@ -215,8 +222,9 @@ const Message = {
         .from('chat_members')
         .select('user_id')
         .eq('chat_id', chat.id);
-      const peerId = (members || []).map((x) => x.user_id).find((id) => id !== userId) || null;
-      if (!peerId) continue;
+      const uniqueMembers = [...new Set((members || []).map((x) => String(x.user_id)))];
+      const peerId = uniqueMembers.find((id) => id !== String(userId)) || null;
+      if (!peerId || peerId === String(userId)) continue;
 
       const msgs = await this.getWithUser(userId, peerId, { limit: 1 });
       const lastMsg = msgs[0] || null;
