@@ -1,23 +1,18 @@
 const path = require('path');
-const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
 const { redis } = require('../config/redis');
 const User = require('../models/User');
 const { asyncHandler } = require('../utils/helpers');
 
-// Render disk is ephemeral / multi-instance — keep media bytes in Redis
-const MAX_REDIS_BYTES = 7 * 1024 * 1024;
+// No disk writes. Files live in Redis so they stay downloadable in chat.
+const MAX_REDIS_BYTES = 12 * 1024 * 1024;
+const RELAY_TTL_SEC = 60 * 60 * 24 * 30; // 30 days — stay available to download
 
 const memoryUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 12 * 1024 * 1024 },
+  limits: { fileSize: MAX_REDIS_BYTES },
 });
-
-const relayDir = path.join(__dirname, '../../uploads/relay');
-if (!fs.existsSync(relayDir)) {
-  fs.mkdirSync(relayDir, { recursive: true });
-}
 
 function publicBase(req) {
   const env = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
@@ -36,16 +31,19 @@ function extFromMime(mime, original) {
   if (mime.includes('m4a') || mime.includes('mp4a') || mime.includes('aac')) return '.m4a';
   if (mime.includes('mpeg') || mime.includes('mp3')) return '.mp3';
   if (mime.includes('ogg')) return '.ogg';
+  if (mime.includes('flac')) return '.flac';
+  if (mime.includes('wav')) return '.wav';
   if (mime.includes('png')) return '.png';
   if (mime.includes('jpeg') || mime.includes('jpg')) return '.jpg';
   if (mime.includes('webp')) return '.webp';
   if (mime.includes('gif')) return '.gif';
   if (mime.includes('pdf')) return '.pdf';
+  if (mime.includes('rar')) return '.rar';
+  if (mime.includes('7z')) return '.7z';
   if (mime.includes('zip')) return '.zip';
+  if (mime.includes('android.package') || mime.includes('apk')) return '.apk';
   if (mime.includes('word') || mime.includes('document')) return '.docx';
   if (mime.includes('sheet') || mime.includes('excel')) return '.xlsx';
-  if (mime.includes('flac')) return '.flac';
-  if (mime.includes('wav')) return '.wav';
   return '.bin';
 }
 
@@ -87,10 +85,9 @@ const uploadRelay = [
     }
     const id = uuidv4();
     const mime = req.file.mimetype || 'application/octet-stream';
-    const name = req.file.originalname || 'file';
-    const ext = extFromMime(mime, name);
+    const name = req.file.originalname || `file${extFromMime(mime, '')}`;
 
-    // Always persist bytes in Redis so any Render instance can serve them
+    // Redis only — no server disk. Kept so chat can re-download.
     const meta = {
       mime,
       name,
@@ -100,16 +97,7 @@ const uploadRelay = [
       size: req.file.size,
     };
 
-    // Optional local cache (best-effort; not relied on for serving)
-    try {
-      const filePath = path.join(relayDir, `${id}${ext}`);
-      fs.writeFileSync(filePath, req.file.buffer);
-      meta.path = filePath;
-    } catch {
-      /* ignore disk errors on Render */
-    }
-
-    await redis.set(`media:relay:${id}`, JSON.stringify(meta), { ex: 60 * 60 * 24 });
+    await redis.set(`media:relay:${id}`, JSON.stringify(meta), { ex: RELAY_TTL_SEC });
 
     const url = `${publicBase(req)}/api/media/relay/${id}`;
     res.status(201).json({
@@ -118,7 +106,7 @@ const uploadRelay = [
       name: meta.name,
       mime: meta.mime,
       size: req.file.size,
-      expires_in: 86400,
+      expires_in: RELAY_TTL_SEC,
     });
   }),
 ];
@@ -126,37 +114,24 @@ const uploadRelay = [
 const getRelay = asyncHandler(async (req, res) => {
   const key = `media:relay:${req.params.id}`;
   const raw = await redis.get(key);
-  if (!raw) return res.status(404).json({ error: 'Файл истёк или не найден' });
+  if (!raw) return res.status(404).json({ error: 'Файл не найден или срок хранения истёк' });
   const payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  if (!payload.data) return res.status(404).json({ error: 'Файл не найден' });
 
-  let buf;
-  if (payload.data) {
-    buf = Buffer.from(payload.data, 'base64');
-  } else if (payload.path && fs.existsSync(payload.path)) {
-    buf = fs.readFileSync(payload.path);
-  } else {
-    return res.status(404).json({ error: 'Файл истёк или не найден' });
-  }
+  const buf = Buffer.from(payload.data, 'base64');
 
+  // Refresh TTL on access so active chats keep files
+  await redis.expire(key, RELAY_TTL_SEC);
+
+  const safeName = String(payload.name || 'file').replace(/[^\w.\-()\s\u0400-\u04FF]+/g, '_');
   res.setHeader('Content-Type', payload.mime || 'application/octet-stream');
   res.setHeader(
     'Content-Disposition',
-    `inline; filename="${encodeURIComponent(payload.name || 'file')}"`,
+    `attachment; filename="${encodeURIComponent(safeName)}"`,
   );
   res.setHeader('Cache-Control', 'private, max-age=3600');
-  res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Access-Control-Allow-Origin', '*');
-
-  if (String(req.query.once || '0') === '1') {
-    await redis.del(key);
-    if (payload.path && fs.existsSync(payload.path)) {
-      try {
-        fs.unlinkSync(payload.path);
-      } catch {
-        /* ignore */
-      }
-    }
-  }
+  res.setHeader('Content-Length', String(buf.length));
   res.send(buf);
 });
 
